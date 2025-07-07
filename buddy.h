@@ -8,6 +8,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/*
+ * MAX_BLOCK = 22 (2^22, 4 MB)
+ * MIN_BLOCK = 12 (2^10, 4 KB)
+ *
+ * MAX_ORDER = MAX_BLOCK - MIN_BLOCK = 10
+ * order = pow - MIN_BLOCK
+ */
 #define MIN_ORDER 0
 #define MAX_ORDER 8
 
