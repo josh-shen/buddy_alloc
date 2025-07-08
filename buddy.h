@@ -15,8 +15,9 @@
  * MAX_ORDER = MAX_BLOCK - MIN_BLOCK = 10
  * order = pow - MIN_BLOCK
  */
-#define MIN_ORDER 0
-#define MAX_ORDER 8
+#define MAX_BLOCK_LOG2 20
+#define MIN_BLOCK_LOG2 12
+#define MAX_ORDER (MAX_BLOCK_LOG2 - MIN_BLOCK_LOG2)
 
 void buddy_init(char *, size_t);
 
