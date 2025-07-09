@@ -6,7 +6,7 @@
 #include "buddy.h"
 
 int main() {
-    char memory[1 << 20];
+    char memory[1 << MEM_BLOCK_LOG2];
 
     buddy_init(memory, sizeof(memory));
 

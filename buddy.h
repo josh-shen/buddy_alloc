@@ -15,13 +15,16 @@
  * MAX_ORDER = MAX_BLOCK - MIN_BLOCK = 10
  * order = pow - MIN_BLOCK
  */
+#define MEM_BLOCK_LOG2 20
 #define MAX_BLOCK_LOG2 20
 #define MIN_BLOCK_LOG2 12
 #define MAX_ORDER (MAX_BLOCK_LOG2 - MIN_BLOCK_LOG2)
 
-void buddy_init(char *, size_t);
+struct buddy;
 
-uintptr_t buddy_malloc(uintptr_t);
+void buddy_init(const char *, size_t);
+
+uintptr_t buddy_malloc(struct buddy, uintptr_t);
 
 void buddy_free(uintptr_t);
 
