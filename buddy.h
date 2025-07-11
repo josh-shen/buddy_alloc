@@ -20,7 +20,7 @@
 #define MIN_BLOCK_LOG2 12
 #define MAX_ORDER (MAX_BLOCK_LOG2 - MIN_BLOCK_LOG2)
 
-#define TOTAL_TREE_NODES ((1 << MEM_BLOCK_LOG2) - 1)
+#define TOTAL_TREE_NODES ((1 << (MEM_BLOCK_LOG2 - MIN_BLOCK_LOG2)) - 1)
 #define TRUNCATED_TREE_NODES ((1 << (MEM_BLOCK_LOG2 - MAX_BLOCK_LOG2)) - 1)
 #define TREE_NODES (TOTAL_TREE_NODES - TRUNCATED_TREE_NODES)
 #define TREE_WORDS (TREE_NODES / 16)
@@ -43,6 +43,6 @@ buddy_t *buddy_init(const char *, size_t);
 
 void *buddy_malloc(buddy_t *, size_t);
 
-void buddy_free(buddy_t *, uintptr_t);
+void buddy_free(buddy_t *, uintptr_t, size_t);
 
 #endif //BUDDY_H

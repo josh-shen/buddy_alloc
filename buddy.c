@@ -23,7 +23,7 @@
  * Remove all nodes from MEM_BLOCK_log2 through MAX_BLOCK_SIZE_log2
  * First N nodes to remove (N) = 2^(MEM_BLOCK_LOG2 - MAX_BLOCK_SIZE_LOG2) - 1
  *
- * Total number of nodes in the tree for a 2^MEM_BLOCK_LOG2 memory pool = 2^MEM_BLOCK - 1  - N
+ * Total number of nodes in the tree for a 2^MEM_BLOCK_LOG2 memory pool = 2^(MEM_BLOCK_LOG2 - MIN_BLOCK_LOG2) - 1  - N
  *
  * order = pow - MIN_BLOCK
  *
@@ -55,13 +55,17 @@ uint8_t get_order(const size_t length) {
     return 0;
 }
 
-void mark_bit_tree(buddy_t *alloc, uintptr_t address, uint8_t order, uint8_t state) {
+uint32_t get_bit_tree_index(buddy_t *alloc, uintptr_t address, uint8_t order) {
     uint8_t height = MEM_BLOCK_LOG2 - order - MIN_BLOCK_LOG2;
     uint32_t offset = (address - alloc->base) / (1 << (MIN_BLOCK_LOG2 + order));
     uint32_t node_index = (1 << height) - 1 + offset - TRUNCATED_TREE_NODES;
 
     // Blocks are represented by 2 bits
-    uint32_t bit_index = node_index * 2;
+    return node_index * 2;
+}
+
+void mark_bit_tree(buddy_t *alloc, uintptr_t address, uint8_t order, uint8_t state) {
+    uint32_t bit_index = get_bit_tree_index(alloc, address, order);
 
     // Find which word and offset within the word the index falls in
     uint32_t word_index = bit_index / 16;
@@ -110,10 +114,6 @@ int split_partition(buddy_t *alloc, int index, int target) {
         if (index == target) return index;
     }
     return -1;
-}
-
-void coalesce(buddy_t *alloc) {
-
 }
 
 buddy_t *buddy_init(const char *base, size_t length) {
@@ -237,6 +237,66 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
     return NULL;
 }
 
-void buddy_free(buddy_t *alloc, uintptr_t address) {
+void buddy_free(buddy_t *alloc, uintptr_t address, size_t length) {
+    uint8_t order = get_order(length);
 
+    uintptr_t buddy_address = address ^ 1 << (order + MIN_BLOCK_LOG2);
+    uint32_t buddy_index = get_bit_tree_index(alloc, buddy_address, order);
+    uint32_t buddy_word_index = buddy_index / 16;
+    uint32_t buddy_word_offset = buddy_index % 16;
+
+    uint8_t buddy_state = alloc->bit_tree[buddy_word_index] >> buddy_word_offset;
+
+    if (buddy_state == 1 || buddy_state == 2 || buddy_state == 3) {
+        // Buddy is either split, allocated, or reserved. Immediately return the memory to free lists
+        buddy_page_t *p = (buddy_page_t *)address;
+        p->prev = NULL;
+        p->next = alloc->free_lists[order];
+
+        alloc->free_lists[order]->prev = p;
+        alloc->free_lists[order] = p;
+
+        // Update the bit tree
+        mark_bit_tree(alloc, address, order, 0);
+    } else {
+        // Buddy is free. Merge
+        while (order <= MAX_ORDER) {
+            // Mark base buddy as free in the bit tree
+            mark_bit_tree(alloc, address, order, 0);
+
+            // Remove buddy from its free list
+            buddy_page_t *buddy_p = (buddy_page_t *)address;
+            buddy_page_t *buddy_p_prev = buddy_p->prev;
+            buddy_page_t *buddy_p_next = buddy_p->next;
+
+            if (buddy_p_prev != NULL) buddy_p_prev->next = buddy_p_next;
+            if (buddy_p_next != NULL) buddy_p_next->prev = buddy_p_prev;
+
+            // If this buddy was the head of the list
+            if (alloc->free_lists[order] == buddy_p) alloc->free_lists[order] = buddy_p_next;
+
+            buddy_p->prev = NULL;
+            buddy_p->next = NULL;
+
+            // Get state of buddy of the next order
+            order++;
+            buddy_address = address ^ 1 << (order + MIN_BLOCK_LOG2);
+            buddy_index = get_bit_tree_index(alloc, buddy_address, order);
+            buddy_word_index = buddy_index / 16;
+            buddy_word_offset = buddy_index % 16;
+
+            buddy_state = alloc->bit_tree[buddy_word_index] >> buddy_word_offset;
+
+            if (buddy_state != 0) break;
+        }
+
+        // Mark bit tree as free (after merging, the nodes state should have been 10 (split))
+        mark_bit_tree(alloc, address, order, 0);
+
+        // Return to free lists
+        buddy_page_t *p = (buddy_page_t *)address;
+        p->prev = NULL;
+        p->next = alloc->free_lists[order];
+        alloc->free_lists[order] = p;
+    }
 }
