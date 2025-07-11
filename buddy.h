@@ -43,6 +43,6 @@ buddy_t *buddy_init(const char *, size_t);
 
 void *buddy_malloc(buddy_t *, size_t);
 
-void buddy_free(uintptr_t);
+void buddy_free(buddy_t *, uintptr_t);
 
 #endif //BUDDY_H

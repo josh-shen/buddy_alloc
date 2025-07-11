@@ -38,7 +38,7 @@
  */
 
 /* HELPER FUNCTIONS */
-uint8_t get_log2(uintptr_t length) {
+uint8_t get_log2(size_t length) {
     uint8_t log2 = 0;
 
     while (length > 1) {
@@ -48,7 +48,7 @@ uint8_t get_log2(uintptr_t length) {
     return log2;
 }
 
-uint8_t get_order(const uintptr_t length) {
+uint8_t get_order(const size_t length) {
     for (int n = MAX_BLOCK_LOG2; n >= MIN_BLOCK_LOG2; n--) {
         if ((unsigned)(1 << n) <= length) return n - MIN_BLOCK_LOG2;
     }
@@ -112,6 +112,10 @@ int split_partition(buddy_t *alloc, int index, int target) {
     return -1;
 }
 
+void coalesce(buddy_t *alloc) {
+
+}
+
 buddy_t *buddy_init(const char *base, size_t length) {
     buddy_t *alloc;
     {
@@ -155,7 +159,7 @@ buddy_t *buddy_init(const char *base, size_t length) {
      */
     while (length >= 1 << MIN_BLOCK_LOG2) {
         uint8_t order = get_order(length);
-        int partition_size = 1 << (order + MIN_BLOCK_LOG2);
+        size_t partition_size = 1 << (order + MIN_BLOCK_LOG2);
 
         buddy_page_t *p = (buddy_page_t *)address;
 
@@ -206,7 +210,7 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
     for (int i = order + 1; i <= MAX_ORDER; i++) {
         if (alloc->free_lists[i] != NULL) {
             // A larger partition found, split
-            int index = split_partition(alloc, i, order);
+            uint8_t index = split_partition(alloc, i, order);
 
             if (index == -1) {
                 printf("Error: Failed to split partition\n");
@@ -233,4 +237,6 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
     return NULL;
 }
 
-//void buddy_free(uintptr_t address) {}
+void buddy_free(buddy_t *alloc, uintptr_t address) {
+
+}
