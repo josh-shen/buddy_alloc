@@ -7,23 +7,20 @@
 #include "buddy.h"
 
 int main() {
-    char memory[1 << MEM_BLOCK_LOG2];
+    char memory[(1 << MEM_BLOCK_LOG2 ) + 152 + 8];
 
     buddy_t *alloc = buddy_init(memory, sizeof(memory));
 
-    char *addr = buddy_malloc(alloc, 262144);
+    char *addr1 = buddy_malloc(alloc, 524288);
+    char *addr2 = buddy_malloc(alloc, 524288);
 
-    printf("%p\n", addr);
+    strncpy(addr1, "Hello", 32);
+    strncpy(addr2, "World!", 32);
 
-    for (int i = 0; i <= MAX_ORDER; i++) {
-        printf("%d: %p\n", i, alloc->free_lists[i]);
-    }
+    printf("%s %s\n", addr1, addr2);
 
-    strncpy(addr, "Hello", 32);
-
-    printf("%s\n", addr);
-
-    // buddy_free()
+    buddy_free(alloc, addr1, 524288);
+    buddy_free(alloc, addr2, 524288);
 
     return 0;
 }

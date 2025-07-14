@@ -74,12 +74,12 @@ void mark_bit_tree(buddy_t *alloc, uintptr_t address, uint8_t order, uint8_t sta
     alloc->bit_tree[word_index] |= state << word_offset;
 }
 
-int split_partition(buddy_t *alloc, int index, int target) {
+uint8_t split_partition(buddy_t *alloc, int index, int target) {
     while (index > target) {
         buddy_page_t *partition = alloc->free_lists[index];
 
         uintptr_t address = (uintptr_t)partition;
-        uintptr_t buddy_address = address + (1 << (index + MIN_BLOCK_LOG2)) / 2;
+        uintptr_t buddy_address = address ^ 1 << (index - 1 + MIN_BLOCK_LOG2);
 
         // Remove the partition from the free list
         alloc->free_lists[index] = partition->next;
@@ -113,21 +113,20 @@ int split_partition(buddy_t *alloc, int index, int target) {
         // Continue splitting if necessary
         if (index == target) return index;
     }
-    return -1;
+    return MAX_ORDER + 1;
 }
 
-buddy_t *buddy_init(const char *base, size_t length) {
+buddy_t *buddy_init(char *base, size_t length) {
     buddy_t *alloc;
     {
         size_t pad = -(uintptr_t) base & _Alignof(buddy_t) - 1;
-        if (length < pad)
-            return NULL;
+        if (length < pad) return NULL;
         base += pad;
         length -= pad;
 
         if (length < sizeof(buddy_t))
             return NULL;
-        alloc = (buddy_t*) base;
+        alloc = (buddy_t *) base;
         base += sizeof(buddy_t);
         length -= sizeof(buddy_t);
     }
@@ -150,18 +149,14 @@ buddy_t *buddy_init(const char *base, size_t length) {
     /* Marking memory
      * Bitmap is initialized as all 0 (free, not split) initially
      * Bitmap does not need to be updated when marking free blocks, only add to free list
-     *
-     * TODO: mark reserved regions
-     * mark region used by the buddy struct as reserved
-     * if current block falls within a reserved region, mark it as reserved in the bitmap
-     * all child nodes of the block must also be marked as reserved
-     * do not add to free lists
      */
     while (length >= 1 << MIN_BLOCK_LOG2) {
         uint8_t order = get_order(length);
         size_t partition_size = 1 << (order + MIN_BLOCK_LOG2);
 
         buddy_page_t *p = (buddy_page_t *)address;
+
+        // TODO: mark split nodes in bit tree
 
         // Free list
         if (alloc->free_lists[order] == NULL) {
@@ -184,7 +179,7 @@ buddy_t *buddy_init(const char *base, size_t length) {
 
 void *buddy_malloc(buddy_t *alloc, size_t length) {
     if (length > 1 << MAX_BLOCK_LOG2) {
-        printf("Error: Requested size is too large: %llu bytes\n", length);
+        printf("Error: Requested size is too large: %lu bytes\n", length);
         return NULL;
     }
 
@@ -212,7 +207,7 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
             // A larger partition found, split
             uint8_t index = split_partition(alloc, i, order);
 
-            if (index == -1) {
+            if (index == MAX_ORDER + 1) {
                 printf("Error: Failed to split partition\n");
                 return NULL;
             }
@@ -237,15 +232,20 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
     return NULL;
 }
 
-void buddy_free(buddy_t *alloc, uintptr_t address, size_t length) {
+void buddy_free(buddy_t *alloc, void *addr, size_t length) {
+    uintptr_t address = (uintptr_t)addr;
     uint8_t order = get_order(length);
 
-    uintptr_t buddy_address = address ^ 1 << (order + MIN_BLOCK_LOG2);
-    uint32_t buddy_index = get_bit_tree_index(alloc, buddy_address, order);
-    uint32_t buddy_word_index = buddy_index / 16;
-    uint32_t buddy_word_offset = buddy_index % 16;
+    uint8_t buddy_state = 3;
 
-    uint8_t buddy_state = alloc->bit_tree[buddy_word_index] >> buddy_word_offset;
+    if (order < MAX_ORDER) {
+        uintptr_t buddy_address = address ^ 1 << (order + MIN_BLOCK_LOG2);
+        uint32_t buddy_index = get_bit_tree_index(alloc, buddy_address, order);
+        uint32_t buddy_word_index = buddy_index / 16;
+        uint32_t buddy_word_offset = buddy_index % 16;
+
+        buddy_state = alloc->bit_tree[buddy_word_index] >> buddy_word_offset & 2;
+    }
 
     if (buddy_state == 1 || buddy_state == 2 || buddy_state == 3) {
         // Buddy is either split, allocated, or reserved. Immediately return the memory to free lists
@@ -253,7 +253,7 @@ void buddy_free(buddy_t *alloc, uintptr_t address, size_t length) {
         p->prev = NULL;
         p->next = alloc->free_lists[order];
 
-        alloc->free_lists[order]->prev = p;
+        if (alloc->free_lists[order]) alloc->free_lists[order]->prev = p;
         alloc->free_lists[order] = p;
 
         // Update the bit tree
@@ -280,10 +280,10 @@ void buddy_free(buddy_t *alloc, uintptr_t address, size_t length) {
 
             // Get state of buddy of the next order
             order++;
-            buddy_address = address ^ 1 << (order + MIN_BLOCK_LOG2);
-            buddy_index = get_bit_tree_index(alloc, buddy_address, order);
-            buddy_word_index = buddy_index / 16;
-            buddy_word_offset = buddy_index % 16;
+            uintptr_t buddy_address = address ^ 1 << (order + MIN_BLOCK_LOG2);
+            uint32_t buddy_index = get_bit_tree_index(alloc, buddy_address, order);
+            uint32_t buddy_word_index = buddy_index / 16;
+            uint32_t buddy_word_offset = buddy_index % 16;
 
             buddy_state = alloc->bit_tree[buddy_word_index] >> buddy_word_offset;
 
@@ -295,8 +295,11 @@ void buddy_free(buddy_t *alloc, uintptr_t address, size_t length) {
 
         // Return to free lists
         buddy_page_t *p = (buddy_page_t *)address;
+
         p->prev = NULL;
         p->next = alloc->free_lists[order];
+
+        if (alloc->free_lists[order]) alloc->free_lists[order]->prev = p;
         alloc->free_lists[order] = p;
     }
 }

@@ -39,10 +39,10 @@ struct buddy {
 };
 typedef struct buddy buddy_t;
 
-buddy_t *buddy_init(const char *, size_t);
+buddy_t *buddy_init(char *, size_t);
 
 void *buddy_malloc(buddy_t *, size_t);
 
-void buddy_free(buddy_t *, uintptr_t, size_t);
+void buddy_free(buddy_t *, void *, size_t);
 
 #endif //BUDDY_H
