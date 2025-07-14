@@ -11,8 +11,8 @@ int main() {
 
     buddy_t *alloc = buddy_init(memory, sizeof(memory));
 
-    char *addr1 = buddy_malloc(alloc, 524288);
-    char *addr2 = buddy_malloc(alloc, 524288);
+    char *addr1 = buddy_malloc(alloc, 1048576/2);
+    char *addr2 = buddy_malloc(alloc, 1048576/2);
 
     strncpy(addr1, "Hello", 32);
     strncpy(addr2, "World!", 32);
