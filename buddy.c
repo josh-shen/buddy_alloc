@@ -23,90 +23,49 @@ static uint32_t get_bit_tree_index(buddy_t *alloc, uintptr_t address, uint8_t or
     return node_index * 2;
 }
 
-static uint8_t get_state(buddy_t *alloc, uintptr_t buddy_address, uint8_t order) {
-    uint32_t buddy_index = get_bit_tree_index(alloc, buddy_address, order);
-    uint32_t buddy_word_index = buddy_index / 16;
-    uint32_t buddy_word_offset = buddy_index % 16;
+static uint8_t get_state(buddy_t *alloc, uintptr_t address, uint8_t order) {
+    uint32_t index = get_bit_tree_index(alloc, address, order);
+    uint32_t word_index = index / 32;
+    uint32_t word_offset = index % 16;
 
-    uint8_t buddy_state = alloc->bit_tree[buddy_word_index] >> buddy_word_offset;
+    uint8_t state = alloc->bit_tree[word_index] >> word_offset;
 
     // Apply mask 11 to get the desired bits
-    return buddy_state & 3;
+    return state & 3;
 }
 
-static void mark_free(buddy_t *alloc, uintptr_t address, uint8_t order) {
+static void set_state(buddy_t *alloc, uintptr_t address, uint8_t order, uint8_t state) {
     uint32_t bit_index = get_bit_tree_index(alloc, address, order);
 
     // Find which word and offset within the word the index falls in
-    uint32_t word_index = bit_index / 16;
-    uint32_t word_offset = bit_index % 16;
+    uint32_t word_index = bit_index / 32;
+    uint32_t word_offset = bit_index % 32;
 
-    // Set bits to 00
-    alloc->bit_tree[word_index] &= 0 << word_offset;
-    alloc->bit_tree[word_index] &= 0 << word_offset + 1;
-}
+    // Create a mask to only set two bits at the target position
+    uint32_t mask = ~(3 << word_offset);
 
-static void mark_split(buddy_t *alloc, uintptr_t address, uint8_t order) {
-    uint32_t bit_index = get_bit_tree_index(alloc, address, order);
-
-    // Find which word and offset within the word the index falls in
-    uint32_t word_index = bit_index / 16;
-    uint32_t word_offset = bit_index % 16;
-
-    // Set bits to 01
-    alloc->bit_tree[word_index] &= 0 << word_offset + 1;
-    alloc->bit_tree[word_index] |= 1 << word_offset;
-}
-
-static void mark_allocated(buddy_t *alloc, uintptr_t address, uint8_t order) {
-    uint32_t bit_index = get_bit_tree_index(alloc, address, order);
-
-    // Find which word and offset within the word the index falls in
-    uint32_t word_index = bit_index / 16;
-    uint32_t word_offset = bit_index % 16;
-
-    // Set bits to 10
-    alloc->bit_tree[word_index] &= 0 << word_offset;
-    alloc->bit_tree[word_index] |= 1 << word_offset + 1;
-}
-
-static void mark_reserved(buddy_t *alloc, uintptr_t address, uint8_t order) {
-    uint32_t bit_index = get_bit_tree_index(alloc, address, order);
-
-    // Find which word and offset within the word the index falls in
-    uint32_t word_index = bit_index / 16;
-    uint32_t word_offset = bit_index % 16;
-
-    // Set bits to 11
-    alloc->bit_tree[word_index] |= 3 << word_offset;
+    alloc->bit_tree[word_index] = alloc->bit_tree[word_index] & mask | state << word_offset;
 }
 
 static void append(buddy_t *alloc, uintptr_t address, uint8_t order) {
     buddy_page_t *p = (buddy_page_t *)address;
 
-    if (alloc->free_lists[order] == NULL) {
-        p->prev = NULL;
-        p->next = NULL;
-        alloc->free_lists[order] = p;
-    } else {
-        p->prev = NULL;
-        p->next = alloc->free_lists[order];
+    if (alloc->free_lists[order]) alloc->free_lists[order]->prev = p;
 
-        alloc->free_lists[order]->prev = p;
-        alloc->free_lists[order] = p;
-    }
+    p->prev = NULL;
+    p->next = alloc->free_lists[order];
+
+    alloc->free_lists[order] = p;
 }
 
 static void free_list_remove(buddy_t *alloc, uintptr_t address, uint8_t order) {
     buddy_page_t *p = (buddy_page_t *)address;
-    buddy_page_t *buddy_p_prev = p->prev;
-    buddy_page_t *buddy_p_next = p->next;
 
-    if (buddy_p_prev != NULL) buddy_p_prev->next = buddy_p_next;
-    if (buddy_p_next != NULL) buddy_p_next->prev = buddy_p_prev;
+    if (p->prev != NULL) p->prev->next = p->next;
 
-    // If this buddy was the head of the list
-    if (alloc->free_lists[order] == p) alloc->free_lists[order] = buddy_p_next;
+    if (alloc->free_lists[order] == p) alloc->free_lists[order] = p->next;
+
+    if (p->next != NULL) p->next->prev = p->prev;
 
     p->prev = NULL;
     p->next = NULL;
@@ -123,7 +82,7 @@ static uint8_t split_partition(buddy_t *alloc, int order, int target) {
         free_list_remove(alloc, address, order);
 
         // Update parent block in bit tree as split
-        mark_split(alloc, address, order);
+        set_state(alloc, address, order, 1);
 
         // Decrement index to the next order
         order--;
@@ -202,7 +161,7 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
         free_list_remove(alloc, address, order);
 
         // Mark partition used in bit tree
-        mark_split(alloc, address, order);
+        set_state(alloc, address, order, 2);
 
         return (char *)address;
     }
@@ -226,7 +185,7 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
             free_list_remove(alloc, address, next_order);
 
             // Mark partition used in bit tree
-            mark_allocated(alloc, address, next_order);
+            set_state(alloc, address, next_order, 2);
 
             return (char *)address;
         }
@@ -249,14 +208,14 @@ void buddy_free(buddy_t *alloc, void *addr, size_t length) {
         append(alloc, address, order);
 
         // Update the bit tree
-        mark_free(alloc, address, order);
+        set_state(alloc, address, order, 0);
         return;
     }
 
     // Buddy is free. Merge
     while (order < MAX_ORDER) {
         // Mark first buddy as free in the bit tree
-        mark_free(alloc, address, order);
+        set_state(alloc, address, order, 0);
 
         // Remove buddy from its free list
         free_list_remove(alloc, buddy_address, order);
@@ -264,7 +223,7 @@ void buddy_free(buddy_t *alloc, void *addr, size_t length) {
         order++;
 
         // Mark the parent block as free now
-        mark_free(alloc, address, order);
+        set_state(alloc, address, order, 0);
 
         // Get state of buddy of the next order
         buddy_state = get_state(alloc, buddy_address, order);

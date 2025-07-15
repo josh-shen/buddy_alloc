@@ -4,16 +4,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/*
- * MAX_BLOCK = 22 (2^22, 4 MB)
- * MIN_BLOCK = 12 (2^10, 4 KB)
- *
- * MAX_ORDER = MAX_BLOCK - MIN_BLOCK = 10
- * order = pow - MIN_BLOCK
- */
-#define MEM_BLOCK_LOG2 20
-#define MAX_BLOCK_LOG2 20
-#define MIN_BLOCK_LOG2 12
+#define MEM_BLOCK_LOG2 6
+#define MAX_BLOCK_LOG2 4
+#define MIN_BLOCK_LOG2 2
 #define MAX_ORDER (MAX_BLOCK_LOG2 - MIN_BLOCK_LOG2)
 
 /* Bit tree
@@ -43,10 +36,10 @@
  *
  * MAX_ORDER = MAX_BLOCK - MIN_BLOCK
  */
-#define TOTAL_TREE_NODES ((1 << (MEM_BLOCK_LOG2 - MIN_BLOCK_LOG2)) - 1)
+#define TOTAL_TREE_NODES ((1 << (MEM_BLOCK_LOG2 - MIN_BLOCK_LOG2 + 1)) - 1)
 #define TRUNCATED_TREE_NODES ((1 << (MEM_BLOCK_LOG2 - MAX_BLOCK_LOG2)) - 1)
 #define TREE_NODES (TOTAL_TREE_NODES - TRUNCATED_TREE_NODES)
-#define TREE_WORDS (TREE_NODES / 16)
+#define TREE_WORDS ((TREE_NODES + 15) / 16)
 
 struct buddy_page {
     struct buddy_page *prev;
