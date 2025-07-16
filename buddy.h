@@ -4,9 +4,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define MEM_BLOCK_LOG2 6
-#define MAX_BLOCK_LOG2 4
-#define MIN_BLOCK_LOG2 2
+/* The minimum block size should be greater than the size of a linked list node
+ * This is 8 bytes on 32-bit systems and 16 bytes on 64-bit
+ * The maximum block size should not be greater than the total memory size
+ */
+#define MEM_BLOCK_LOG2 8
+#define MAX_BLOCK_LOG2 8
+#define MIN_BLOCK_LOG2 4
 #define MAX_ORDER (MAX_BLOCK_LOG2 - MIN_BLOCK_LOG2)
 
 /* Bit tree
