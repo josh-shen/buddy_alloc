@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
+//#define LOGGING
+#define ERR_LOGGING
+
 /* The minimum block size should be greater than the size of a linked list node
  * This is 8 bytes on 32-bit systems and 16 bytes on 64-bit
  * The maximum block size should not be greater than the total memory size
@@ -65,4 +68,4 @@ void *buddy_malloc(buddy_t *, size_t);
 
 void buddy_free(buddy_t *, void *, size_t);
 
-#endif //BUDDY_H
+#endif
