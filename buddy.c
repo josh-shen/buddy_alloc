@@ -24,22 +24,22 @@ static uint32_t get_bit_tree_index(buddy_t *alloc, uintptr_t address, uint8_t or
 
 static uint8_t get_state(buddy_t *alloc, uintptr_t address, uint8_t order) {
     uint32_t index = get_bit_tree_index(alloc, address, order);
-    uint32_t word_index = index / 16;
-    uint32_t word_offset = index * 2 % 32;
+    uint32_t word_index = index / 32;
+    uint32_t word_offset = index % 32;
 
     uint8_t state = alloc->bit_tree[word_index] >> word_offset;
 
-    // Apply mask 11 to get the desired bits
-    return state & 3;
+    // Apply mask to get the desired bit
+    return state & 1;
 }
 
 static void set_state(buddy_t *alloc, uintptr_t address, uint8_t order, uint8_t state) {
     uint32_t index = get_bit_tree_index(alloc, address, order);
-    uint32_t word_index = index / 16;
-    uint32_t word_offset = index * 2 % 32;
+    uint32_t word_index = index / 32;
+    uint32_t word_offset = index % 32;
 
-    // Create a mask to only set two bits at the target position
-    uint32_t mask = ~(3 << word_offset);
+    // Create a mask to only set the bit at the target position
+    uint32_t mask = ~(1 << word_offset);
 
     alloc->bit_tree[word_index] = (alloc->bit_tree[word_index] & mask) | state << word_offset;
 
@@ -80,32 +80,28 @@ static void free_list_remove(buddy_t *alloc, uintptr_t address, uint8_t order) {
     #endif
 }
 
-static uint8_t split_partition(buddy_t *alloc, int order, int target) {
+static uint8_t split(buddy_t *alloc, int order, int target) {
     while (order > target) {
         buddy_page_t *partition = alloc->free_lists[order];
 
         uintptr_t address = (uintptr_t)partition;
         uintptr_t buddy_address = ((address - alloc->base) ^ 1 << (order - 1 + MIN_BLOCK_LOG2)) + alloc->base;
 
-        // Remove the partition from the free list
         free_list_remove(alloc, address, order);
 
-        // Update parent block in bit tree as split
+        // Mark the parent block as split in the bit tree
         set_state(alloc, address, order, 1);
 
         #ifdef LOGGING
         printf("Block of order %u split\n", order);
         #endif
 
-        // Decrement index to the next order
         order--;
 
-        // Add both buddies to their new free list
-        // No need to mark free
+        // Since the bit tree was initialized as all free, these buddies are already marked free in the bit tree
         append(alloc, address, order);
         append(alloc, buddy_address, order);
 
-        // Continue splitting if necessary
         if (order == target) return order;
     }
     return MAX_ORDER + 1;
@@ -151,12 +147,11 @@ buddy_t *buddy_init(char *base, size_t length) {
 
     uintptr_t address = alloc->base;
 
-    // Add free memory to free lists
+    // Add free memory blocks to free lists
     while (length >= 1 << MIN_BLOCK_LOG2) {
         uint8_t order = get_order(length);
         size_t partition_size = 1 << (order + MIN_BLOCK_LOG2);
 
-        // Add to free list
         append(alloc, address, order);
 
         address += partition_size;
@@ -169,8 +164,8 @@ buddy_t *buddy_init(char *base, size_t length) {
         uint8_t order = get_order(used);
         size_t partition_size = 1 << (order + MIN_BLOCK_LOG2);
 
-        // Mark reserved in bit tree
-        set_state(alloc, address, order, 3);
+        // Mark block as reserved in the bit tree
+        set_state(alloc, address, order, 1);
 
         address += partition_size;
         used -= partition_size;
@@ -198,14 +193,13 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
 
         uintptr_t address = (uintptr_t)partition;
 
-        // Remove the partition from the free list
         free_list_remove(alloc, address, order);
 
-        // Mark partition used in bit tree
-        set_state(alloc, address, order, 2);
+        // Mark block as used in the bit tree
+        set_state(alloc, address, order, 1);
 
         #ifdef LOGGING
-        printf("%u bytes allocated for a requested size of %llu bytes\n\n", 1 << order + MIN_BLOCK_LOG2, length);
+        printf("%u bytes allocated for a requested size of %llu bytes\n\n", 1 << (order + MIN_BLOCK_LOG2), length);
         #endif
         return (char *)address;
     }
@@ -214,7 +208,7 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
     for (int i = order + 1; i <= MAX_ORDER; i++) {
         if (alloc->free_lists[i] != NULL) {
             // A larger partition found, split
-            uint8_t next_order = split_partition(alloc, i, order);
+            uint8_t next_order = split(alloc, i, order);
 
             if (next_order == MAX_ORDER + 1) {
                 #ifdef ERR_LOGGING
@@ -227,14 +221,13 @@ void *buddy_malloc(buddy_t *alloc, size_t length) {
 
             uintptr_t address = (uintptr_t)partition;
 
-            // Remove the partition from the free list
             free_list_remove(alloc, address, next_order);
 
-            // Mark partition used in bit tree
-            set_state(alloc, address, next_order, 2);
+            // Mark block as used in the bit tree
+            set_state(alloc, address, next_order, 1);
 
             #ifdef LOGGING
-            printf("%u bytes allocated for a requested size of %llu bytes\n\n", 1 << order + MIN_BLOCK_LOG2, length);
+            printf("%u bytes allocated for a requested size of %llu bytes\n\n", 1 << (order + MIN_BLOCK_LOG2), length);
             #endif
             return (char *)address;
         }
@@ -261,12 +254,11 @@ void buddy_free(buddy_t *alloc, void *addr, size_t length) {
     uintptr_t buddy_address = ((address - alloc->base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc->base;
     uint8_t buddy_state = get_state(alloc, buddy_address, order);
 
-    // Buddy is either split, allocated, or reserved. Immediately return the block to free lists
-    if (buddy_state == 1 || buddy_state == 2 || buddy_state == 3) {
-        // Add block back to free lists
+    // Buddy is either split or allocated - immediately return the block to free lists
+    if (buddy_state == 1) {
         append(alloc, address, order);
 
-        // Update the bit tree
+        // Mark block as free in the bit tree
         set_state(alloc, address, order, 0);
 
         #ifdef LOGGING
@@ -275,13 +267,12 @@ void buddy_free(buddy_t *alloc, void *addr, size_t length) {
         return;
     }
 
-    // Buddy is free. Merge
+    // Buddy is free - merge
     while (order < MAX_ORDER) {
+        free_list_remove(alloc, buddy_address, order);
+
         // Mark first buddy as free in the bit tree
         set_state(alloc, address, order, 0);
-
-        // Remove buddy from its free list
-        free_list_remove(alloc, buddy_address, order);
 
         #ifdef LOGGING
         printf("Buddies of order %u merged\n", order);
@@ -289,10 +280,10 @@ void buddy_free(buddy_t *alloc, void *addr, size_t length) {
 
         order++;
 
-        // Mark the parent block as free now
+        // Mark the parent block as free in the bit tree
         set_state(alloc, address, order, 0);
 
-        // Get state of buddy of the next order
+        // Get state of buddy of the parent block
         buddy_address = ((address - alloc->base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc->base;
         buddy_state = get_state(alloc, buddy_address, order);
 
